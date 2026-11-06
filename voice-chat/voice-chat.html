@@ -1,0 +1,795 @@
+<title>说给 Claude 听</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Serif+SC:wght@500;600&display=swap">
+<style>
+/* Layout: a one-screen field transcript (场记): slim header strip, scrolling transcript with timecode + speaker columns, input dock at the foot */
+:root {
+  --paper: #ECEFEA;
+  --sheet: #F7F8F5;
+  --ink: #1A2320;
+  --muted: #59665F;
+  --rule: #CBD2CC;
+  --accent: #1D5B4E;
+  --accent-soft: #D3E3DC;
+  --on-accent: #F4F8F6;
+  --rec: #B8332A;
+  --rec-soft: #EBC9C4;
+  --f-display: "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --f-body: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #111614; --sheet: #19201D; --ink: #E1E7E3; --muted: #93A099; --rule: #2B3430;
+    --accent: #6BC0A6; --accent-soft: #1E3530; --on-accent: #0D1311; --rec: #FF7A6E; --rec-soft: #4A2522;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #111614; --sheet: #19201D; --ink: #E1E7E3; --muted: #93A099; --rule: #2B3430;
+  --accent: #6BC0A6; --accent-soft: #1E3530; --on-accent: #0D1311; --rec: #FF7A6E; --rec-soft: #4A2522;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.6;
+}
+button, select, textarea, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app {
+  height: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* Header strip */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--rule);
+}
+.brand { flex: 1; min-width: 0; }
+h1 {
+  margin: 0;
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 1.25;
+  letter-spacing: .02em;
+  text-wrap: balance;
+}
+.sub { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); letter-spacing: .06em; }
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.meter { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.meter i { display: block; width: 3px; height: 4px; border-radius: 1px; background: currentColor; opacity: .5; }
+.status[data-state="armed"], .status[data-state="thinking"], .status[data-state="writing"] { color: var(--accent); border-color: var(--accent-soft); }
+.status[data-state="speaking"] { color: var(--rec); border-color: var(--rec-soft); }
+.status[data-state="speaking"] .meter i { opacity: 1; animation: level .9s ease-in-out infinite; }
+.status[data-state="thinking"] .meter i,
+.status[data-state="writing"] .meter i { animation: blink 1.2s ease-in-out infinite; }
+.meter i:nth-child(2) { animation-delay: -.45s !important; }
+.meter i:nth-child(3) { animation-delay: -.2s !important; }
+.meter i:nth-child(4) { animation-delay: -.65s !important; }
+@keyframes level { 0%, 100% { height: 3px; } 50% { height: 12px; } }
+@keyframes blink { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+
+.ghost {
+  flex: none;
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 5px 11px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.ghost[aria-expanded="true"] { background: var(--sheet); border-color: var(--accent); color: var(--accent); }
+
+/* Settings */
+.settings {
+  flex: 0 1 auto;
+  max-height: 52%;
+  overflow-y: auto;
+  margin-top: 10px;
+  padding: 4px 14px;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding-block: 11px;
+  border-bottom: 1px solid var(--rule);
+}
+.row:last-child { border-bottom: 0; }
+.row > label, .row > .lbl { font-size: 15px; min-width: 0; }
+.row small { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.ctl { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; }
+input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--accent); margin: 0; }
+input[type="range"] { width: 150px; max-width: 100%; accent-color: var(--accent); }
+select {
+  max-width: 100%;
+  font-size: 14px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+output { font-family: var(--f-mono); font-size: 13px; min-width: 3.2em; font-variant-numeric: tabular-nums; }
+.danger { color: var(--rec); border-color: var(--rec); }
+
+/* Transcript */
+.log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-block: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.guide {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.guide h2 { margin: 0 0 6px; font-family: var(--f-display); font-weight: 600; font-size: 16px; }
+.guide ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; counter-reset: step; }
+.guide li { display: grid; grid-template-columns: 1.6em minmax(0, 1fr); font-size: 14.5px; color: var(--ink); }
+.guide li::before { counter-increment: step; content: counter(step); font-family: var(--f-mono); color: var(--accent); font-size: 13px; padding-top: 2px; }
+.guide kbd { font-family: var(--f-mono); font-size: 12.5px; border: 1px solid var(--rule); border-radius: 4px; padding: 0 4px; background: var(--paper); }
+
+.turn { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.turn.user + .turn.claude { margin-top: -6px; }
+.turn.user:not(:first-child) { padding-top: 18px; border-top: 1px dashed var(--rule); }
+.meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  letter-spacing: .04em;
+  font-variant-numeric: tabular-nums;
+}
+.who { font-family: var(--f-body); font-size: 12px; font-weight: 600; letter-spacing: .14em; }
+.claude .who { color: var(--accent); }
+.tag { font-family: var(--f-body); font-size: 11px; letter-spacing: .08em; border: 1px solid var(--rule); border-radius: 4px; padding: 0 5px; }
+.text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.claude .text { font-family: var(--f-display); font-size: 17px; line-height: 1.8; }
+.turn.pending .text::before { content: "思考中…"; font-family: var(--f-body); font-size: 14px; color: var(--muted); animation: blink 1.4s ease-in-out infinite; }
+.actions { display: flex; flex-wrap: wrap; gap: 14px; }
+.actions:empty { display: none; }
+.link {
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.note { font-size: 13px; color: var(--muted); }
+.note.err { color: var(--rec); }
+@media (min-width: 560px) {
+  .turn { grid-template-columns: 6.25rem minmax(0, 1fr); column-gap: 16px; }
+  .meta { grid-row: 1 / span 3; flex-direction: column; gap: 2px; padding-top: 4px; }
+  .text, .actions, .note { grid-column: 2; }
+}
+
+/* Dock */
+.dock {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-block: 10px 12px;
+  border-top: 1px solid var(--rule);
+}
+.hint { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.composer { display: flex; align-items: flex-end; gap: 8px; }
+textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 52px;
+  max-height: 30vh;
+  resize: none;
+  padding: 13px 14px;
+  font-size: 16px;
+  line-height: 1.5;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+}
+textarea:focus { outline: 2px solid var(--accent-soft); outline-offset: 0; border-color: var(--accent); }
+textarea::placeholder { color: var(--muted); }
+.round {
+  position: relative;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.send { border: 0; background: var(--accent); color: var(--on-accent); }
+.send:disabled { opacity: .4; cursor: default; }
+.send svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.ring {
+  fill: none;
+  stroke: var(--on-accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 138.3;
+  stroke-dashoffset: 138.3;
+  transform: rotate(-90deg);
+  transform-origin: 24px 24px;
+  opacity: 0;
+}
+.send.arming .ring { opacity: .9; animation: fillring var(--dur, 3s) linear forwards; }
+@keyframes fillring { to { stroke-dashoffset: 0; } }
+.stop { background: transparent; border: 1.5px solid var(--rec); color: var(--rec); }
+
+@media (prefers-reduced-motion: reduce) {
+  .meter i, .turn.pending .text::before { animation: none !important; }
+  .status[data-state="speaking"] .meter i { height: 9px; }
+  .send.arming .ring { animation: none; stroke-dashoffset: 0; }
+}
+</style>
+
+<div class="app">
+  <header class="bar">
+    <div class="brand">
+      <h1>说给 Claude 听</h1>
+      <span class="sub">用听写说话，Claude 读出回答</span>
+    </div>
+    <div class="status" id="status" data-state="idle" role="status">
+      <span class="meter" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span id="statusText">待命</span>
+    </div>
+    <button id="settingsBtn" class="ghost" type="button" aria-expanded="false" aria-controls="settings">设置</button>
+  </header>
+
+  <section id="settings" class="settings" hidden aria-label="设置">
+    <div class="row">
+      <label for="optSpeak">朗读回答<small id="ttsNote">回答一边生成一边读出来</small></label>
+      <div class="ctl"><input type="checkbox" id="optSpeak"></div>
+    </div>
+    <div class="row">
+      <label for="optRate">语速</label>
+      <div class="ctl"><input type="range" id="optRate" min="0.7" max="1.6" step="0.1"><output id="rateOut" for="optRate">1.1×</output></div>
+    </div>
+    <div class="row">
+      <label for="optVoice">中文声音<small>英文句子会自动换英文声音</small></label>
+      <div class="ctl"><select id="optVoice"><option value="">自动选择</option></select><button id="testVoice" class="ghost" type="button">试听</button></div>
+    </div>
+    <div class="row">
+      <label for="optAuto">停顿后自动发送<small>说完停一下就发出，不用再点按钮</small></label>
+      <div class="ctl"><input type="checkbox" id="optAuto"></div>
+    </div>
+    <div class="row">
+      <label for="optDelay">停顿多久算说完</label>
+      <div class="ctl"><select id="optDelay"><option value="2">2 秒</option><option value="3">3 秒</option><option value="5">5 秒</option></select></div>
+    </div>
+    <div class="row">
+      <label for="optLength">回答长短</label>
+      <div class="ctl"><select id="optLength"><option value="short">简短（两三句）</option><option value="medium">适中（一两百字）</option><option value="long">详细</option></select></div>
+    </div>
+    <div class="row">
+      <label for="optDeep">深入思考<small>回答更周到，但要多等几秒到几十秒</small></label>
+      <div class="ctl"><input type="checkbox" id="optDeep"></div>
+    </div>
+    <div class="row">
+      <span class="lbl">对话记录<small>只保存在这台设备的浏览器里</small></span>
+      <div class="ctl"><button id="clearBtn" class="ghost" type="button">清空对话</button></div>
+    </div>
+  </section>
+
+  <main id="log" class="log" aria-live="polite">
+    <div id="intro">
+      <div class="guide">
+        <h2>怎么用</h2>
+        <ol>
+          <li><span id="step1">轻点下方输入框，按键盘上的麦克风键开始说话。</span></li>
+          <li><span>说完停顿一下，发送键外圈走满一圈就自动发出。想接着说，继续说就行。</span></li>
+          <li><span>Claude 的回答会一边写一边读出来。你一开口，朗读就停下。</span></li>
+        </ol>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:18px;margin-top:18px">
+        <article class="turn user">
+          <div class="meta"><span class="tc">--:--:--</span><span class="who">我</span><span class="tag">示例</span></div>
+          <div class="text">我在写一篇关于纪录片同期声的论文，第一段该从哪里切入比较好</div>
+        </article>
+        <article class="turn claude">
+          <div class="meta"><span class="tc">--:--:--</span><span class="who">CLAUDE</span><span class="tag">示例</span></div>
+          <div class="text">可以从一段具体的现场声音切入，比如一段没有处理过的环境音，然后追问它为什么会让观众相信画面是真的。这样问题会自然地浮出来。你手上有现成的片例吗？</div>
+        </article>
+      </div>
+    </div>
+  </main>
+
+  <footer class="dock">
+    <p class="hint" id="hint">轻点输入框，按键盘上的麦克风键说话；也可以直接打字。</p>
+    <div class="composer">
+      <textarea id="box" rows="1" placeholder="在这里说话或打字" aria-label="要对 Claude 说的话"></textarea>
+      <button id="stopBtn" class="round stop" type="button" hidden>停止</button>
+      <button id="sendBtn" class="round send" type="button" aria-label="发送">
+        <svg viewBox="0 0 48 48" aria-hidden="true"><circle class="ring" cx="24" cy="24" r="22"></circle></svg>
+        <span>发送</span>
+      </button>
+    </div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var log = $("log"), box = $("box"), sendBtn = $("sendBtn"), stopBtn = $("stopBtn");
+  var statusEl = $("status"), statusText = $("statusText"), hint = $("hint");
+
+  /* ---------- per-viewer storage (convenience only) ---------- */
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem("vc:" + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem("vc:" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var DEFAULTS = { speak: true, rate: 1.1, voice: "", auto: true, delay: 3, length: "short", deep: false };
+  var settings = Object.assign({}, DEFAULTS, store.get("settings", {}) || {});
+  var turns = store.get("turns", []);
+  if (!Array.isArray(turns)) turns = [];
+  turns = turns.filter(function (t) { return t && (t.role === "user" || t.role === "assistant") && typeof t.content === "string" && t.content.trim(); });
+  function saveSettings() { store.set("settings", settings); }
+  function saveTurns() { store.set("turns", turns.slice(-80)); }
+
+  /* ---------- platform-specific dictation hint ---------- */
+  var ua = navigator.userAgent || "";
+  var isMobile = /iPhone|iPad|iPod|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  var isMac = /Macintosh/.test(ua) && !isMobile, isWin = /Windows/.test(ua);
+  var dictate = isMobile ? "轻点输入框，按键盘上的麦克风键说话"
+    : isMac ? "点进输入框，按两下 Fn 键开始听写（需在系统设置里打开听写）"
+    : isWin ? "点进输入框，按 Win + H 开始听写"
+    : "点进输入框，用系统的听写功能说话";
+  hint.textContent = dictate + "；也可以直接打字。";
+  $("step1").textContent = dictate + "。";
+  if (!isMobile) box.placeholder = "在这里说话或打字，回车发送";
+
+  /* ---------- speech output ---------- */
+  var tts = ("speechSynthesis" in window && "SpeechSynthesisUtterance" in window) ? window.speechSynthesis : null;
+  var voices = [], speakGen = 0, speakCount = 0, live = new Set(), watch = null, idleSeen = 0;
+
+  function loadVoices() {
+    if (!tts) return;
+    try { voices = tts.getVoices() || []; } catch (e) { voices = []; }
+    var sel = $("optVoice");
+    var zh = voices.filter(function (v) { return /^(zh|cmn|yue)/i.test(v.lang); });
+    sel.textContent = "";
+    sel.append(new Option("自动选择", ""));
+    zh.forEach(function (v) { sel.append(new Option(v.name + "（" + v.lang + "）", v.voiceURI)); });
+    sel.value = zh.some(function (v) { return v.voiceURI === settings.voice; }) ? settings.voice : "";
+  }
+  function pickVoice(isZh) {
+    if (isZh) {
+      if (settings.voice) { var chosen = voices.find(function (v) { return v.voiceURI === settings.voice; }); if (chosen) return chosen; }
+      return voices.find(function (v) { return /^zh[-_]CN/i.test(v.lang); }) || voices.find(function (v) { return /^(zh|cmn)/i.test(v.lang); }) || null;
+    }
+    return voices.find(function (v) { return /^en[-_]US/i.test(v.lang) && v.localService; }) || voices.find(function (v) { return /^en/i.test(v.lang); }) || null;
+  }
+  function clean(s) {
+    return s.replace(/```[\s\S]*?```/g, " ").replace(/`/g, "")
+      .replace(/https?:\/\/\S+/g, "链接")
+      .replace(/^\s*(?:[-•]|\d+[.)、])\s+/gm, "")
+      .replace(/[*_#>|~]+/g, "")
+      .replace(/\s+/g, " ").trim();
+  }
+  function utter(text, gen) {
+    var t = clean(text);
+    if (!t || !/[\p{L}\p{N}]/u.test(t)) return;
+    var isZh = /[㐀-鿿]/.test(t);
+    var u = new SpeechSynthesisUtterance(t);
+    u.lang = isZh ? "zh-CN" : "en-US";
+    var v = pickVoice(isZh); if (v) u.voice = v;
+    u.rate = Number(settings.rate) || 1;
+    var finished = false;
+    var done = function () {
+      if (finished) return; finished = true; live.delete(u);
+      if (gen !== speakGen) return;
+      speakCount = Math.max(0, speakCount - 1); refresh();
+    };
+    u.onend = done; u.onerror = done;
+    speakCount++; live.add(u);
+    try { tts.speak(u); } catch (e) { done(); }
+    refresh();
+  }
+  function stopSpeaking() {
+    speakGen++; speakCount = 0; live.clear();
+    if (tts) { try { tts.cancel(); } catch (e) {} }
+    refresh();
+  }
+  /* Some web views never fire onend: if the engine is idle twice in a row, reset. */
+  function watchdog() {
+    if (speakCount > 0 && tts && !watch) {
+      idleSeen = 0;
+      watch = setInterval(function () {
+        if (speakCount === 0) { clearInterval(watch); watch = null; return; }
+        if (!tts.speaking && !tts.pending) { if (++idleSeen >= 2) { speakCount = 0; refresh(); } } else idleSeen = 0;
+      }, 1500);
+    }
+  }
+  /* Streams text into sentence-sized utterances so reading starts before the answer is finished. */
+  function makeSpeaker() {
+    var gen = speakGen, buf = "", muted = false;
+    var ENDERS = "。！？!?；;…\n", TRAIL = "。！？!?；;…”’」』）)\"' \n";
+    function say(s) { if (!muted && gen === speakGen && settings.speak && tts) utter(s, gen); }
+    function cut(force) {
+      for (;;) {
+        var idx = -1;
+        for (var i = 0; i < buf.length; i++) {
+          var c = buf[i];
+          if (ENDERS.indexOf(c) >= 0) { idx = i; break; }
+          if (c === "." && i + 1 < buf.length && /\s/.test(buf[i + 1])) { idx = i; break; }
+        }
+        if (idx < 0) {
+          if (force) { if (buf.trim()) say(buf); buf = ""; }
+          else if (buf.length > 90) {
+            var j = Math.max(buf.lastIndexOf("，"), buf.lastIndexOf(", "));
+            if (j > 20) { say(buf.slice(0, j + 1)); buf = buf.slice(j + 1); }
+          }
+          return;
+        }
+        var end = idx + 1;
+        while (end < buf.length && TRAIL.indexOf(buf[end]) >= 0) end++;
+        say(buf.slice(0, end)); buf = buf.slice(end);
+      }
+    }
+    return {
+      push: function (d) { if (muted) return; buf += d; cut(false); },
+      end: function () { if (!muted) cut(true); buf = ""; },
+      mute: function () { muted = true; buf = ""; }
+    };
+  }
+  function speakAll(text) { stopSpeaking(); var sp = makeSpeaker(); sp.push(text); sp.end(); }
+
+  /* iOS only allows speech after a gesture: speak a silent space on the first tap. */
+  var unlocked = false;
+  function unlock() {
+    if (unlocked || !tts) return; unlocked = true;
+    try { var u = new SpeechSynthesisUtterance(" "); u.volume = 0; tts.speak(u); } catch (e) {}
+  }
+  document.addEventListener("pointerdown", unlock, true);
+  document.addEventListener("keydown", unlock, true);
+
+  /* Keep the screen on during a conversation where allowed. */
+  var wakeLock = null;
+  function keepAwake() {
+    if (wakeLock || !navigator.wakeLock || document.visibilityState !== "visible") return;
+    navigator.wakeLock.request("screen").then(function (l) { wakeLock = l; l.addEventListener("release", function () { wakeLock = null; }); }).catch(function () {});
+  }
+  document.addEventListener("visibilitychange", function () { if (turns.length) keepAwake(); });
+
+  /* ---------- transcript rendering ---------- */
+  var introTpl = $("intro").cloneNode(true);
+  var hasIntro = true;
+  function pad(n) { return String(n).padStart(2, "0"); }
+  function timecode(t) {
+    var d = new Date(t), now = new Date();
+    var hms = pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+    return d.toDateString() === now.toDateString() ? hms : (pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + hms.slice(0, 5));
+  }
+  function nearEnd() { return log.scrollHeight - log.scrollTop - log.clientHeight < 140; }
+  function toEnd() { log.scrollTop = log.scrollHeight; }
+  function clearIntro() { if (hasIntro) { var el = $("intro"); if (el) el.remove(); hasIntro = false; } }
+  function turnEl(role, text, t) {
+    var art = document.createElement("article");
+    art.className = "turn " + (role === "user" ? "user" : "claude");
+    var meta = document.createElement("div"); meta.className = "meta";
+    var tc = document.createElement("span"); tc.className = "tc"; tc.textContent = timecode(t);
+    var who = document.createElement("span"); who.className = "who"; who.textContent = role === "user" ? "我" : "CLAUDE";
+    meta.append(tc, who);
+    var body = document.createElement("div"); body.className = "text"; body.textContent = text;
+    var actions = document.createElement("div"); actions.className = "actions";
+    art.append(meta, body, actions);
+    log.append(art); toEnd();
+    return { art: art, body: body, actions: actions, t: t };
+  }
+  function addReplay(view, text) {
+    if (!tts) return;
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "link"; b.textContent = "重听";
+    b.addEventListener("click", function () { speakAll(text); });
+    view.actions.append(b);
+  }
+  function addNote(view, msg, isErr) {
+    var p = document.createElement("div");
+    p.className = "note" + (isErr ? " err" : ""); p.textContent = msg;
+    view.art.append(p);
+  }
+  function pushTurn(role, content, t) {
+    turns.push({ role: role, content: content, t: t });
+    if (turns.length > 80) turns = turns.slice(-80);
+    saveTurns();
+  }
+  function renderStored() {
+    if (!turns.length) return;
+    clearIntro();
+    turns.forEach(function (tt) {
+      var v = turnEl(tt.role, tt.content, tt.t || Date.now());
+      if (tt.role === "assistant") addReplay(v, tt.content);
+    });
+    toEnd();
+  }
+
+  /* ---------- talking to Claude ---------- */
+  var samplePromise = (window.claude && typeof window.claude.use === "function")
+    ? window.claude.use("sample").catch(function () { return null; })
+    : Promise.resolve(null);
+  var sampleOff = false, busy = false, gotText = false, ctl = null, retryView = null;
+
+  function disable(msg) {
+    sampleOff = true;
+    hint.textContent = msg;
+    refresh();
+  }
+  samplePromise.then(function (s) {
+    if (!s) disable("要在 claude.ai 或 Claude 应用里打开这个页面，才能和 Claude 对话。");
+  });
+
+  function rules() {
+    var len = {
+      short: "每次回答控制在两三句话、一百字以内",
+      medium: "每次回答控制在一百到两百字",
+      long: "可以详细回答，但仍然用短句，一段话不要太长"
+    }[settings.length] || "每次回答控制在两三句话、一百字以内";
+    return [
+      "我们在进行语音对话。请遵守下面几条：",
+      "1. 我的话来自语音听写，可能有同音错字、漏字或没有标点。请按最合理的意思理解，不必指出我的错字。",
+      "2. 你的回答会被朗读出来。请用自然的口语，不要用 Markdown、标题、列表符号、表格、代码块、网址或表情符号。",
+      "3. 用短句。" + len + "，除非我明确要求展开。",
+      "4. 用我说话的语言回答；我说中文就用简体中文。",
+      "5. 需要追问时，一次只问一个问题。",
+      "直接开始对话，不要复述这些规则。"
+    ].join("\n");
+  }
+  function history() {
+    var out = [], size = 0;
+    for (var i = turns.length - 1; i >= 0; i--) {
+      size += turns[i].content.length;
+      if (out.length >= 30 || size > 40000) break;
+      out.unshift({ role: turns[i].role, content: turns[i].content });
+    }
+    while (out.length && out[0].role !== "user") out.shift();
+    return out;
+  }
+  var HIDE = { not_granted: 1, sampling_disabled: 1, not_declared: 1, capability_disabled: 1, capability_removed: 1, tools_unavailable: 1, images_unavailable: 1 };
+  function copyFor(code) {
+    switch (code) {
+      case "not_granted": return "你没有允许这个页面使用 Claude。要使用的话，在页面的权限菜单里打开，再重新载入页面。";
+      case "sampling_disabled": case "not_declared": case "capability_disabled": case "capability_removed":
+        return "这个账号或这个视图里暂时不能调用 Claude。";
+      case "rate_limited": return "调用太频繁，或者用量到了上限。过一会儿再点「重发」。";
+      case "session_expired": return "登录已过期。请重新登录 claude.ai，再载入这个页面。";
+      case "empty_completion": return "Claude 没有给出内容。换个说法再说一次。";
+      case "prompt_too_large": return "对话太长了。在设置里清空对话后再试。";
+      default: return "连接中断了，回答没有完成。可以点「重发」再试一次。";
+    }
+  }
+
+  function ask() {
+    return samplePromise.then(function (s) {
+      if (!s || sampleOff) return;
+      var view = turnEl("assistant", "", Date.now());
+      view.art.classList.add("pending");
+      busy = true; gotText = false;
+      var myCtl = ctl = new AbortController();
+      stopSpeaking();
+      var sp = makeSpeaker();
+      keepAwake();
+      refresh();
+      return s([{ role: "user", content: rules() }].concat(history()), {
+        cache: false,
+        signal: myCtl.signal,
+        modelTier: settings.deep ? "default" : "quick",
+        onText: function (u) {
+          var stick = nearEnd();
+          if (!gotText) { gotText = true; view.art.classList.remove("pending"); }
+          view.body.textContent = u.text;
+          sp.push(u.delta);
+          if (stick) toEnd();
+          refresh();
+        }
+      }).then(function (res) {
+        sp.end();
+        view.art.classList.remove("pending");
+        view.body.textContent = res.text;
+        pushTurn("assistant", res.text, view.t);
+        addReplay(view, res.text);
+        if (res.truncated) addNote(view, "回答到了长度上限，后面被截断了。");
+      }).catch(function (e) {
+        var code = (e && e.code) || "upstream_error";
+        var partial = (e && typeof e.text === "string") ? e.text : "";
+        sp.mute();
+        view.art.classList.remove("pending");
+        if (code === "cancelled") {
+          if (partial.trim()) {
+            view.body.textContent = partial;
+            pushTurn("assistant", partial, view.t);
+            addReplay(view, partial);
+            addNote(view, "已停止。");
+          } else view.art.remove();
+          return;
+        }
+        if (code === "refused") {
+          stopSpeaking();
+          view.body.textContent = "";
+          addNote(view, "Claude 没有回答这一句。换个说法再试试。", true);
+          return;
+        }
+        view.body.textContent = partial;
+        addNote(view, copyFor(code), true);
+        if (HIDE[code]) { disable(copyFor(code)); return; }
+        if (code === "upstream_error" || code === "rate_limited" || !code) {
+          var b = document.createElement("button");
+          b.type = "button"; b.className = "link"; b.textContent = "重发";
+          b.addEventListener("click", function () {
+            if (busy) return;
+            if (retryView) { retryView.art.remove(); retryView = null; }
+            ask();
+          });
+          view.actions.append(b);
+          retryView = view;
+        }
+      }).finally(function () {
+        busy = false;
+        if (ctl === myCtl) ctl = null;
+        refresh();
+        if (box.value.trim()) armAuto();
+      });
+    });
+  }
+
+  function send() {
+    clearAuto();
+    var text = box.value.trim();
+    if (!text || busy || sampleOff) return;
+    clearIntro();
+    if (retryView) { retryView.actions.textContent = ""; retryView = null; }
+    stopSpeaking();
+    box.value = ""; autosize();
+    var t = Date.now();
+    pushTurn("user", text, t);
+    turnEl("user", text, t);
+    ask();
+  }
+
+  /* ---------- auto-send after a pause ---------- */
+  var autoTimer = null, composing = false;
+  function clearAuto() {
+    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    sendBtn.classList.remove("arming");
+    refresh();
+  }
+  function armAuto() {
+    clearAuto();
+    if (!settings.auto || composing || busy || sampleOff || !box.value.trim()) return;
+    sendBtn.style.setProperty("--dur", settings.delay + "s");
+    void sendBtn.offsetWidth;
+    sendBtn.classList.add("arming");
+    autoTimer = setTimeout(function () { autoTimer = null; sendBtn.classList.remove("arming"); send(); }, settings.delay * 1000);
+    refresh();
+  }
+
+  /* ---------- status ---------- */
+  var LABEL = { idle: "待命", armed: "", thinking: "思考中", writing: "回答中", speaking: "朗读中", off: "未连接" };
+  function refresh() {
+    var s;
+    if (sampleOff && !busy) s = "off";
+    else if (busy && !gotText) s = "thinking";
+    else if (speakCount > 0) s = "speaking";
+    else if (busy) s = "writing";
+    else if (autoTimer) s = "armed";
+    else s = "idle";
+    statusEl.dataset.state = s;
+    statusText.textContent = s === "armed" ? settings.delay + " 秒后发送" : LABEL[s];
+    stopBtn.hidden = !(busy || speakCount > 0);
+    sendBtn.disabled = sampleOff || busy;
+    watchdog();
+  }
+
+  /* ---------- input ---------- */
+  function autosize() { box.style.height = "auto"; box.style.height = Math.min(box.scrollHeight + 2, window.innerHeight * 0.3) + "px"; }
+  box.addEventListener("compositionstart", function () { composing = true; clearAuto(); });
+  box.addEventListener("compositionend", function () { composing = false; armAuto(); });
+  box.addEventListener("input", function () {
+    autosize();
+    if (speakCount > 0) stopSpeaking();   /* speaking over Claude stops the reading */
+    armAuto();
+  });
+  box.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229 && !isMobile) { e.preventDefault(); send(); }
+  });
+  /* Keep the keyboard open: buttons should not steal focus from the text box. */
+  [sendBtn, stopBtn].forEach(function (b) { b.addEventListener("pointerdown", function (e) { e.preventDefault(); }); });
+  sendBtn.addEventListener("click", send);
+  stopBtn.addEventListener("click", function () { if (ctl) ctl.abort(); stopSpeaking(); });
+
+  /* ---------- settings ---------- */
+  var panel = $("settings"), settingsBtn = $("settingsBtn");
+  settingsBtn.addEventListener("click", function () {
+    panel.hidden = !panel.hidden;
+    settingsBtn.setAttribute("aria-expanded", String(!panel.hidden));
+  });
+  function bindCheck(id, key, after) {
+    var el = $(id); el.checked = !!settings[key];
+    el.addEventListener("change", function () { settings[key] = el.checked; saveSettings(); if (after) after(el.checked); refresh(); });
+  }
+  bindCheck("optSpeak", "speak", function (on) { if (!on) stopSpeaking(); });
+  bindCheck("optAuto", "auto", function (on) { if (on) armAuto(); else clearAuto(); });
+  bindCheck("optDeep", "deep");
+  var rate = $("optRate"), rateOut = $("rateOut");
+  rate.value = String(settings.rate); rateOut.textContent = Number(settings.rate).toFixed(1) + "×";
+  rate.addEventListener("input", function () { settings.rate = Number(rate.value); rateOut.textContent = settings.rate.toFixed(1) + "×"; saveSettings(); });
+  var delay = $("optDelay"); delay.value = String(settings.delay);
+  delay.addEventListener("change", function () { settings.delay = Number(delay.value) || 3; saveSettings(); if (autoTimer) armAuto(); });
+  var length = $("optLength"); length.value = settings.length;
+  length.addEventListener("change", function () { settings.length = length.value; saveSettings(); });
+  $("optVoice").addEventListener("change", function (e) { settings.voice = e.target.value; saveSettings(); });
+  $("testVoice").addEventListener("click", function () { speakAll("你好，我是 Claude。现在的朗读速度是这样的。"); });
+
+  if (tts) {
+    loadVoices();
+    if ("onvoiceschanged" in tts) tts.onvoiceschanged = loadVoices;
+  } else {
+    $("optSpeak").checked = false;
+    ["optSpeak", "optRate", "optVoice", "testVoice"].forEach(function (id) { $(id).disabled = true; });
+    $("ttsNote").textContent = "这个浏览器不支持朗读，回答只显示文字。";
+  }
+
+  var clearBtn = $("clearBtn"), clearArm = null;
+  function resetClear() { clearTimeout(clearArm); clearArm = null; clearBtn.textContent = "清空对话"; clearBtn.classList.remove("danger"); }
+  clearBtn.addEventListener("click", function () {
+    if (!clearArm) { clearBtn.textContent = "再点一次，确认清空"; clearBtn.classList.add("danger"); clearArm = setTimeout(resetClear, 3000); return; }
+    resetClear();
+    if (ctl) ctl.abort();
+    stopSpeaking(); clearAuto();
+    turns = []; saveTurns(); retryView = null;
+    log.textContent = "";
+    log.append(introTpl.cloneNode(true)); hasIntro = true;
+    $("step1").textContent = dictate + "。";
+  });
+
+  renderStored();
+  refresh();
+})();
+</script>
